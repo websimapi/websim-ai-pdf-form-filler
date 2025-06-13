@@ -1,10 +1,18 @@
 import * as PDFLib from 'pdf-lib';
+import * as pdfjsLib from 'pdfjs-dist';
+import Tesseract from 'tesseract.js';
+
+// Set up PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.skypack.dev/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
 
 class PDFFormFiller {
     constructor() {
         this.pdfBytes = null;
         this.detectedFields = [];
         this.formData = {};
+        this.pdfDocument = null;
+        this.pageImages = [];
+        this.ocrData = [];
         this.initializeEventListeners();
     }
 
@@ -60,7 +68,11 @@ class PDFFormFiller {
             const arrayBuffer = await file.arrayBuffer();
             this.pdfBytes = new Uint8Array(arrayBuffer);
             
-            await this.renderPDFPreview();
+            // Load PDF with PDF.js
+            this.pdfDocument = await pdfjsLib.getDocument(this.pdfBytes).promise;
+            
+            await this.renderPDFPages();
+            await this.performOCR();
             await this.analyzeFormFields();
             
             this.showSection('previewSection');
@@ -71,99 +83,247 @@ class PDFFormFiller {
         }
     }
 
-    async renderPDFPreview() {
-        // Using PDF.js for rendering
+    async renderPDFPages() {
+        this.pageImages = [];
         const canvas = document.getElementById('pdfCanvas');
         const ctx = canvas.getContext('2d');
         
-        // Convert PDF to image for AI analysis
-        const pdfDoc = await PDFLib.PDFDocument.load(this.pdfBytes);
-        const pages = pdfDoc.getPages();
-        const firstPage = pages[0];
-        const { width, height } = firstPage.getSize();
+        // Render first page for preview
+        const page = await this.pdfDocument.getPage(1);
+        const viewport = page.getViewport({ scale: 1.5 });
         
-        canvas.width = width;
-        canvas.height = height;
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
         
-        // Simple representation - in a real implementation, you'd use PDF.js
-        ctx.fillStyle = '#f8f9fa';
-        ctx.fillRect(0, 0, width, height);
+        const renderContext = {
+            canvasContext: ctx,
+            viewport: viewport
+        };
         
-        ctx.fillStyle = '#333';
-        ctx.font = '16px Arial';
-        ctx.fillText('PDF Preview (Page 1)', 20, 30);
-        ctx.fillText(`Size: ${Math.round(width)} x ${Math.round(height)}`, 20, 55);
+        await page.render(renderContext).promise;
+        
+        // Convert all pages to images for AI analysis
+        for (let pageNum = 1; pageNum <= this.pdfDocument.numPages; pageNum++) {
+            const page = await this.pdfDocument.getPage(pageNum);
+            const viewport = page.getViewport({ scale: 2.0 }); // Higher scale for better AI analysis
+            
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.height = viewport.height;
+            tempCanvas.width = viewport.width;
+            
+            await page.render({
+                canvasContext: tempCtx,
+                viewport: viewport
+            }).promise;
+            
+            const imageDataUrl = tempCanvas.toDataURL('image/png');
+            this.pageImages.push({
+                pageNum,
+                imageDataUrl,
+                width: viewport.width,
+                height: viewport.height,
+                scale: 2.0
+            });
+        }
+    }
+
+    async performOCR() {
+        this.ocrData = [];
+        
+        for (let i = 0; i < this.pageImages.length; i++) {
+            const pageImage = this.pageImages[i];
+            
+            try {
+                const result = await Tesseract.recognize(
+                    pageImage.imageDataUrl,
+                    'eng',
+                    {
+                        logger: m => {
+                            if (m.status === 'recognizing text') {
+                                document.querySelector('.processing-section p').textContent = 
+                                    `Performing OCR on page ${i + 1}/${this.pageImages.length}... ${Math.round(m.progress * 100)}%`;
+                            }
+                        }
+                    }
+                );
+                
+                this.ocrData.push({
+                    pageNum: pageImage.pageNum,
+                    words: result.data.words,
+                    lines: result.data.lines,
+                    text: result.data.text
+                });
+            } catch (error) {
+                console.error(`OCR failed for page ${pageImage.pageNum}:`, error);
+                this.ocrData.push({
+                    pageNum: pageImage.pageNum,
+                    words: [],
+                    lines: [],
+                    text: ''
+                });
+            }
+        }
+        
+        document.querySelector('.processing-section p').textContent = 'AI is analyzing form fields...';
     }
 
     async analyzeFormFields() {
         try {
-            // Convert PDF to image data URL for AI analysis
-            const canvas = document.getElementById('pdfCanvas');
-            const imageDataUrl = canvas.toDataURL('image/png');
+            this.detectedFields = [];
             
-            const completion = await websim.chat.completions.create({
-                messages: [
-                    {
-                        role: "system",
-                        content: `Analyze this PDF form image and detect form fields that need to be filled out.
-                        Look for text labels followed by blank spaces, underlines, boxes, or areas that appear to be form fields.
-                        Common field types include: name, address, date, signature, checkbox, dropdown, text area.
-                        
-                        Respond with JSON in this exact format:
+            // Analyze each page
+            for (let i = 0; i < this.pageImages.length; i++) {
+                const pageImage = this.pageImages[i];
+                const ocrData = this.ocrData[i];
+                
+                const completion = await websim.chat.completions.create({
+                    messages: [
                         {
-                          "fields": [
+                            role: "system",
+                            content: `You are an expert at analyzing PDF forms to detect fillable fields. 
+                            
+                            I will provide you with:
+                            1. An image of a PDF page
+                            2. OCR text data with word positions
+                            
+                            Your task is to identify form fields that need to be filled out by looking for:
+                            - Text labels followed by blank spaces, lines, or boxes
+                            - Input areas like signature lines, date fields, checkboxes
+                            - Areas that appear to accept user input
+                            
+                            Use the OCR data to understand the context and positioning of text elements.
+                            
+                            Respond with JSON in this exact format:
                             {
-                              "id": "field_1",
-                              "label": "Full Name",
-                              "type": "text",
-                              "x": 100,
-                              "y": 200,
-                              "width": 200,
-                              "height": 25,
-                              "required": true
+                              "fields": [
+                                {
+                                  "id": "unique_field_id",
+                                  "label": "Field Label",
+                                  "type": "text|email|date|number|checkbox|textarea|select",
+                                  "x": 100,
+                                  "y": 200,
+                                  "width": 200,
+                                  "height": 25,
+                                  "required": true,
+                                  "pageNum": 1,
+                                  "confidence": 0.9
+                                }
+                              ]
                             }
-                          ]
+                            
+                            Coordinates should be in the image coordinate system (top-left origin).
+                            Be conservative - only detect clear form fields with high confidence.`
+                        },
+                        {
+                            role: "user", 
+                            content: [
+                                {
+                                    type: "text",
+                                    text: `Please analyze this PDF page for form fields. 
+                                    
+                                    OCR Text Data:
+                                    Full Text: ${ocrData.text}
+                                    
+                                    Word Positions: ${JSON.stringify(ocrData.words.slice(0, 50).map(w => ({
+                                        text: w.text,
+                                        x: w.bbox.x0,
+                                        y: w.bbox.y0,
+                                        width: w.bbox.x1 - w.bbox.x0,
+                                        height: w.bbox.y1 - w.bbox.y0
+                                    })))}
+                                    
+                                    Page dimensions: ${pageImage.width}x${pageImage.height}
+                                    Page number: ${pageImage.pageNum}`
+                                },
+                                {
+                                    type: "image_url",
+                                    image_url: { url: pageImage.imageDataUrl }
+                                }
+                            ]
                         }
-                        
-                        Field types: "text", "email", "date", "number", "checkbox", "textarea", "select"
-                        Coordinates should be approximate positions on the page.`
-                    },
-                    {
-                        role: "user",
-                        content: [
-                            {
-                                type: "text",
-                                text: "Please analyze this PDF form and detect all the form fields that need to be filled out."
-                            },
-                            {
-                                type: "image_url",
-                                image_url: { url: imageDataUrl }
-                            }
-                        ]
-                    }
-                ],
-                json: true
-            });
+                    ],
+                    json: true
+                });
 
-            const result = JSON.parse(completion.content);
-            this.detectedFields = result.fields || [];
+                const result = JSON.parse(completion.content);
+                if (result.fields && result.fields.length > 0) {
+                    // Convert coordinates from image scale to PDF scale
+                    const scaledFields = result.fields.map(field => ({
+                        ...field,
+                        x: field.x / pageImage.scale,
+                        y: field.y / pageImage.scale,
+                        width: field.width / pageImage.scale,
+                        height: field.height / pageImage.scale,
+                        pageNum: pageImage.pageNum
+                    }));
+                    
+                    this.detectedFields.push(...scaledFields);
+                }
+            }
+            
+            // If no fields detected, provide fallback
+            if (this.detectedFields.length === 0) {
+                this.detectedFields = [
+                    { id: 'name', label: 'Full Name', type: 'text', x: 100, y: 100, width: 200, height: 25, required: true, pageNum: 1 },
+                    { id: 'email', label: 'Email Address', type: 'email', x: 100, y: 150, width: 200, height: 25, required: true, pageNum: 1 },
+                    { id: 'date', label: 'Date', type: 'date', x: 100, y: 200, width: 150, height: 25, required: false, pageNum: 1 }
+                ];
+            }
             
             this.displayDetectedFields();
             this.generateDynamicForm();
             
         } catch (error) {
             console.error('Error analyzing form fields:', error);
-            // Fallback: create some default fields
-            this.detectedFields = [
-                { id: 'name', label: 'Full Name', type: 'text', x: 100, y: 100, width: 200, height: 25, required: true },
-                { id: 'email', label: 'Email Address', type: 'email', x: 100, y: 150, width: 200, height: 25, required: true },
-                { id: 'date', label: 'Date', type: 'date', x: 100, y: 200, width: 150, height: 25, required: false },
-                { id: 'signature', label: 'Signature', type: 'text', x: 100, y: 300, width: 200, height: 25, required: true }
+            // Fallback with OCR-based field detection
+            this.fallbackOCRDetection();
+        }
+    }
+
+    fallbackOCRDetection() {
+        // Simple OCR-based field detection as fallback
+        this.detectedFields = [];
+        
+        this.ocrData.forEach(pageOCR => {
+            const commonLabels = [
+                'name', 'first name', 'last name', 'full name',
+                'email', 'e-mail', 'email address',
+                'date', 'today\'s date', 'signature date',
+                'address', 'street address', 'city', 'state', 'zip',
+                'phone', 'telephone', 'mobile',
+                'signature', 'sign here', 'your signature'
             ];
             
-            this.displayDetectedFields();
-            this.generateDynamicForm();
-        }
+            pageOCR.words.forEach((word, index) => {
+                const text = word.text.toLowerCase();
+                const matchedLabel = commonLabels.find(label => 
+                    text.includes(label) || label.includes(text)
+                );
+                
+                if (matchedLabel && word.text.length > 2) {
+                    let fieldType = 'text';
+                    if (matchedLabel.includes('email')) fieldType = 'email';
+                    else if (matchedLabel.includes('date')) fieldType = 'date';
+                    else if (matchedLabel.includes('signature')) fieldType = 'text';
+                    
+                    this.detectedFields.push({
+                        id: `field_${pageOCR.pageNum}_${index}`,
+                        label: word.text,
+                        type: fieldType,
+                        x: word.bbox.x1 + 10, // Position field after the label
+                        y: word.bbox.y0,
+                        width: 150,
+                        height: 20,
+                        required: true,
+                        pageNum: pageOCR.pageNum
+                    });
+                }
+            });
+        });
+        
+        this.displayDetectedFields();
+        this.generateDynamicForm();
     }
 
     displayDetectedFields() {
@@ -267,21 +427,34 @@ class PDFFormFiller {
     async generateFilledPDF() {
         const pdfDoc = await PDFLib.PDFDocument.load(this.pdfBytes);
         const pages = pdfDoc.getPages();
-        const firstPage = pages[0];
         const font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
         
-        // Add form data to PDF
+        // Group fields by page
+        const fieldsByPage = {};
         this.detectedFields.forEach(field => {
-            const value = this.formData[field.id];
-            if (value) {
-                firstPage.drawText(value.toString(), {
-                    x: field.x,
-                    y: firstPage.getHeight() - field.y - 15, // PDF coordinate system is bottom-up
-                    size: 12,
-                    font: font,
-                    color: PDFLib.rgb(0, 0, 0)
-                });
+            if (!fieldsByPage[field.pageNum]) {
+                fieldsByPage[field.pageNum] = [];
             }
+            fieldsByPage[field.pageNum].push(field);
+        });
+        
+        // Add form data to each page
+        Object.keys(fieldsByPage).forEach(pageNum => {
+            const page = pages[parseInt(pageNum) - 1];
+            const pageHeight = page.getHeight();
+            
+            fieldsByPage[pageNum].forEach(field => {
+                const value = this.formData[field.id];
+                if (value) {
+                    page.drawText(value.toString(), {
+                        x: field.x,
+                        y: pageHeight - field.y - 15, // Convert from top-left to bottom-left coordinate system
+                        size: 10,
+                        font: font,
+                        color: PDFLib.rgb(0, 0, 0)
+                    });
+                }
+            });
         });
         
         return await pdfDoc.save();
