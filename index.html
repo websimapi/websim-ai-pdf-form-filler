@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI PDF Form Filler</title>
+    <link rel="stylesheet" href="styles.css">
+    <script type="importmap">
+    {
+        "imports": {
+            "pdf-lib": "https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"
+        }
+    }
+    </script>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>AI PDF Form Filler</h1>
+            <p>Upload a PDF and let AI detect form fields to create an interactive form</p>
+        </header>
+
+        <div class="upload-section" id="uploadSection">
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">📄</div>
+                <h3>Drop your PDF here or click to browse</h3>
+                <p>Supports PDF files up to 10MB</p>
+                <input type="file" id="fileInput" accept=".pdf" hidden>
+            </div>
+        </div>
+
+        <div class="processing-section" id="processingSection" style="display: none;">
+            <div class="processing-spinner"></div>
+            <h3>AI is analyzing your PDF...</h3>
+            <p>Detecting form fields and positions</p>
+        </div>
+
+        <div class="preview-section" id="previewSection" style="display: none;">
+            <div class="pdf-preview">
+                <h3>Original PDF Preview</h3>
+                <canvas id="pdfCanvas"></canvas>
+            </div>
+            
+            <div class="form-generator">
+                <h3>Generated Form</h3>
+                <div id="detectedFields"></div>
+                <form id="dynamicForm">
+                    <div id="formFields"></div>
+                    <div class="form-actions">
+                        <button type="button" id="previewBtn" class="btn btn-secondary">Preview Filled PDF</button>
+                        <button type="button" id="downloadBtn" class="btn btn-primary">Download Filled PDF</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="output-section" id="outputSection" style="display: none;">
+            <h3>Filled PDF Preview</h3>
+            <canvas id="outputCanvas"></canvas>
+        </div>
+    </div>
+
+    <script type="module" src="script.js"></script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>
+
