@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import * as PDFLib from 'pdf-lib';
 
 class PDFFormFiller {
     constructor() {
@@ -77,7 +77,7 @@ class PDFFormFiller {
         const ctx = canvas.getContext('2d');
         
         // Convert PDF to image for AI analysis
-        const pdfDoc = await PDFDocument.load(this.pdfBytes);
+        const pdfDoc = await PDFLib.PDFDocument.load(this.pdfBytes);
         const pages = pdfDoc.getPages();
         const firstPage = pages[0];
         const { width, height } = firstPage.getSize();
@@ -265,10 +265,10 @@ class PDFFormFiller {
     }
 
     async generateFilledPDF() {
-        const pdfDoc = await PDFDocument.load(this.pdfBytes);
+        const pdfDoc = await PDFLib.PDFDocument.load(this.pdfBytes);
         const pages = pdfDoc.getPages();
         const firstPage = pages[0];
-        const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+        const font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
         
         // Add form data to PDF
         this.detectedFields.forEach(field => {
@@ -279,7 +279,7 @@ class PDFFormFiller {
                     y: firstPage.getHeight() - field.y - 15, // PDF coordinate system is bottom-up
                     size: 12,
                     font: font,
-                    color: rgb(0, 0, 0)
+                    color: PDFLib.rgb(0, 0, 0)
                 });
             }
         });
@@ -320,4 +320,3 @@ class PDFFormFiller {
 document.addEventListener('DOMContentLoaded', () => {
     new PDFFormFiller();
 });
-
