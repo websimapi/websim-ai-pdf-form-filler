@@ -1,9 +1,11 @@
 import * as PDFLib from 'pdf-lib';
-import * as pdfjsLib from 'pdfjs-dist';
 import Tesseract from 'tesseract.js';
 
+// Load PDF.js from unpkg
+const pdfjsLib = await import('https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.min.js');
+
 // Set up PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.skypack.dev/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.worker.min.js';
 
 class PDFFormFiller {
     constructor() {
@@ -69,7 +71,8 @@ class PDFFormFiller {
             this.pdfBytes = new Uint8Array(arrayBuffer);
             
             // Load PDF with PDF.js
-            this.pdfDocument = await pdfjsLib.getDocument(this.pdfBytes).promise;
+            const loadingTask = pdfjsLib.getDocument(this.pdfBytes);
+            this.pdfDocument = await loadingTask.promise;
             
             await this.renderPDFPages();
             await this.performOCR();
