@@ -1,11 +1,20 @@
 import * as PDFLib from 'pdf-lib';
 import Tesseract from 'tesseract.js';
 
-// Load PDF.js from unpkg
-const pdfjsLib = await import('https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.min.js');
+// Load PDF.js properly
+let pdfjsLib;
 
-// Set up PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.worker.min.js';
+async function initializePDFJS() {
+    try {
+        pdfjsLib = await import('https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.min.js');
+        // Set up PDF.js worker after successful import
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.worker.min.js';
+        return true;
+    } catch (error) {
+        console.error('Failed to load PDF.js:', error);
+        return false;
+    }
+}
 
 class PDFFormFiller {
     constructor() {
@@ -15,6 +24,16 @@ class PDFFormFiller {
         this.pdfDocument = null;
         this.pageImages = [];
         this.ocrData = [];
+        this.pdfjsReady = false;
+        this.initializeApp();
+    }
+
+    async initializeApp() {
+        this.pdfjsReady = await initializePDFJS();
+        if (!this.pdfjsReady) {
+            alert('Failed to load PDF processing library. Please refresh the page.');
+            return;
+        }
         this.initializeEventListeners();
     }
 
@@ -59,6 +78,11 @@ class PDFFormFiller {
     }
 
     async handleFileUpload(file) {
+        if (!this.pdfjsReady) {
+            alert('PDF processing library not ready. Please wait and try again.');
+            return;
+        }
+
         if (file.type !== 'application/pdf') {
             alert('Please upload a PDF file');
             return;
